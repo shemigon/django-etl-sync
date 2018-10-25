@@ -1,21 +1,23 @@
 from __future__ import print_function
-from backports import csv
-from builtins import str as text
+
 import io
 import os
 from datetime import datetime
+
+from backports import csv
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, DatabaseError
+from django.db import DatabaseError, IntegrityError
+
 from etl_sync.generators import InstanceGenerator
 from etl_sync.transformations import Transformer
 
 
 def get_logfilename(filename):
     ret = None
-    if isinstance(filename, (text, str)):
+    if isinstance(filename, str):
         ret = os.path.join(
             os.path.dirname(filename), '{0}.{1}.log'.format(
-            filename, datetime.now().strftime('%Y-%m-%d')))
+                filename, datetime.now().strftime('%Y-%m-%d')))
     return ret
 
 
@@ -56,11 +58,12 @@ class FeedbackCounter(object):
         dic = {
             'filename': str(kwargs.get('filename')),
             'records': kwargs.get('records'),
-            'time': datetime.now()-self.feedbacktime,
+            'time': datetime.now() - self.feedbacktime,
             'total': self.counter,
             'created': self.created,
             'updated': self.updated,
-            'rejected': self.rejected}
+            'rejected': self.rejected
+        }
         print(self.message.format(**dic))
         self.feedbacktime = datetime.now()
 
@@ -118,14 +121,15 @@ class Extractor(object):
     """
 
     def __init__(self, source, reader_class=csv.DictReader,
-                 reader_kwargs={
-                    'delimiter': u'\t', 'quoting': csv.QUOTE_NONE},
-                 options={}):
+                 reader_kwargs=None, options=None):
         self.source = source
-        self.options = options
+        self.options = options or {}
         self.reader_class = reader_class or csv.DictReader
         self.reader_kwargs = reader_kwargs or {
-            'delimiter': u'\t', 'quoting': csv.QUOTE_NONE}
+            'delimiter': u'\t',
+            'quoting': csv.QUOTE_NONE
+        }
+        self.fil = None
 
     def __enter__(self):
         """
@@ -138,15 +142,15 @@ class Extractor(object):
         represented as a folder or an url representing an API end point.
         """
         if hasattr(self.source, 'read'):
-            fil = self.source
+            self.fil = self.source
         else:
             try:
-                fil = io.open(self.source)
+                self.fil = io.open(self.source)
             except IOError:
-                fil = self.source
-        return self.reader_class(fil, **self.reader_kwargs)
+                self.fil = self.source
+        return self.reader_class(self.fil, **self.reader_kwargs)
 
-    def __exit__(self, type, value, traceback):
+    def __exit__(self, exc_type, exc_val, exc_tb):
         try:
             self.fil.close()
         except (AttributeError, IOError):
@@ -172,19 +176,19 @@ class Logger(object):
         """
         Log to log file or to stdout if self.logfile=None
         """
-        print(text(txt), file=self.logfile)
+        print(str(txt), file=self.logfile)
 
     def log_start(self, options):
         self.log(self.start_message.format(**options))
 
     def log_reader_error(self, line, error):
-        self.log(self.reader_error_message.format(line, text(error)))
+        self.log(self.reader_error_message.format(line, str(error)))
 
     def log_transformation_error(self, line, error):
-        self.log(self.transformation_error_message.format(line, text(error)))
+        self.log(self.transformation_error_message.format(line, str(error)))
 
     def log_instance_error(self, line, error):
-        self.log(self.instance_error_message.format(line, text(error)))
+        self.log(self.instance_error_message.format(line, str(error)))
 
     def close(self):
         if self.logfile:
@@ -203,9 +207,9 @@ class Loader(object):
     extractor_class = Extractor
     persistence = []
 
-    def __init__(self, source, model_class=None, options={}):
+    def __init__(self, source, model_class=None, options=None):
         self.source = source
-        self.options = options
+        self.options = options or {}
         self.model_class = model_class or self.model_class
         self.logfilename = options.get('logfilename')
         self.feedbacksize = options.get('feedbacksize', 5000)
@@ -236,7 +240,7 @@ class Loader(object):
     def feedback(self, counter):
         if counter.counter % self.feedbacksize == 0:
             counter.feedback(
-            filename=self.source, records=self.feedbacksize)
+                filename=self.source, records=self.feedbacksize)
             if not self.feedback_hook(counter.counter):
                 raise StopIteration
 
@@ -289,7 +293,6 @@ class Loader(object):
         counter.use_result(self.generator.res)
         self.feedback(counter)
 
-
     def load(self):
         """
         Loads data into database using Django models and error logging.
@@ -299,7 +302,8 @@ class Loader(object):
         logger.log_start({
             'start_time': datetime.now().strftime('%Y-%m-%d'),
             'slice_begin': self.slice_begin,
-            'slice_end': self.slice_end})
+            'slice_end': self.slice_end
+        })
         counter = FeedbackCounter()
 
         with self.extractor as extractor:
