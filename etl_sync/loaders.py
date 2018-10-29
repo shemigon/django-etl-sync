@@ -1,104 +1,14 @@
 from __future__ import print_function
-from backports import csv
-from builtins import str as text
+
 import io
-import os
-from datetime import datetime
+
+from backports import csv
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, DatabaseError
+from django.db import DatabaseError, IntegrityError
+
 from etl_sync.generators import InstanceGenerator
+from etl_sync.logging import StdoutLogger
 from etl_sync.transformations import Transformer
-
-
-def get_logfilename(filename):
-    ret = None
-    if isinstance(filename, (text, str)):
-        ret = os.path.join(
-            os.path.dirname(filename), '{0}.{1}.log'.format(
-            filename, datetime.now().strftime('%Y-%m-%d')))
-    return ret
-
-
-def create_logfile(filename=None):
-    if filename:
-        return open(filename, 'w')
-    else:
-        return None
-
-
-def get_logfile(filename=None, logfilename=None):
-    if not logfilename:
-        logfilename = get_logfilename(filename)
-    return create_logfile(logfilename)
-
-
-class FeedbackCounter(object):
-    """
-    Keeps track of the ETL process and provides feedback.
-    """
-
-    def __init__(self, counter=0):
-        self.counter = counter
-        self.rejected = 0
-        self.created = 0
-        self.updated = 0
-        self.starttime = datetime.now()
-        self.feedbacktime = self.starttime
-        self.message = (
-            'Extraction from {filename}:\n{records} records processed '
-            'in {time}, {total}: {created} created, {updated} updated, '
-            '{rejected} rejected.')
-
-    def feedback(self, **kwargs):
-        """
-        Print feedback.
-        """
-        dic = {
-            'filename': str(kwargs.get('filename')),
-            'records': kwargs.get('records'),
-            'time': datetime.now()-self.feedbacktime,
-            'total': self.counter,
-            'created': self.created,
-            'updated': self.updated,
-            'rejected': self.rejected}
-        print(self.message.format(**dic))
-        self.feedbacktime = datetime.now()
-
-    def increment(self):
-        self.counter += 1
-
-    def reject(self):
-        self.rejected += 1
-        self.increment()
-
-    def create(self):
-        self.created += 1
-        self.increment()
-
-    def update(self):
-        self.updated += 1
-        self.increment()
-
-    def use_result(self, res):
-        """
-        Use feedback from InstanceGenerator to set counters.
-        """
-        if res == 'created':
-            self.create()
-        elif res == 'updated':
-            self.update()
-        else:
-            self.increment()
-
-    def finished(self):
-        """
-        Provides a final message.
-        """
-        return (
-            'Data extraction finished {0}\n\n{1} '
-            'created\n{2} updated\n{3} rejected'.format(
-                datetime.now(), self.created, self.updated,
-                self.rejected))
 
 
 class Extractor(object):
@@ -118,14 +28,15 @@ class Extractor(object):
     """
 
     def __init__(self, source, reader_class=csv.DictReader,
-                 reader_kwargs={
-                    'delimiter': u'\t', 'quoting': csv.QUOTE_NONE},
-                 options={}):
+                 reader_kwargs=None, options=None):
         self.source = source
-        self.options = options
+        self.options = options or {}
         self.reader_class = reader_class or csv.DictReader
         self.reader_kwargs = reader_kwargs or {
-            'delimiter': u'\t', 'quoting': csv.QUOTE_NONE}
+            'delimiter': u'\t',
+            'quoting': csv.QUOTE_NONE
+        }
+        self.fil = None
 
     def __enter__(self):
         """
@@ -138,15 +49,15 @@ class Extractor(object):
         represented as a folder or an url representing an API end point.
         """
         if hasattr(self.source, 'read'):
-            fil = self.source
+            self.fil = self.source
         else:
             try:
-                fil = io.open(self.source)
+                self.fil = io.open(self.source)
             except IOError:
-                fil = self.source
-        return self.reader_class(fil, **self.reader_kwargs)
+                self.fil = self.source
+        return self.reader_class(self.fil, **self.reader_kwargs)
 
-    def __exit__(self, type, value, traceback):
+    def __exit__(self, exc_type, exc_val, exc_tb):
         try:
             self.fil.close()
         except (AttributeError, IOError):
@@ -172,19 +83,19 @@ class Logger(object):
         """
         Log to log file or to stdout if self.logfile=None
         """
-        print(text(txt), file=self.logfile)
+        print(str(txt), file=self.logfile)
 
     def log_start(self, options):
         self.log(self.start_message.format(**options))
 
     def log_reader_error(self, line, error):
-        self.log(self.reader_error_message.format(line, text(error)))
+        self.log(self.reader_error_message.format(line, str(error)))
 
     def log_transformation_error(self, line, error):
-        self.log(self.transformation_error_message.format(line, text(error)))
+        self.log(self.transformation_error_message.format(line, str(error)))
 
     def log_instance_error(self, line, error):
-        self.log(self.instance_error_message.format(line, text(error)))
+        self.log(self.instance_error_message.format(line, str(error)))
 
     def close(self):
         if self.logfile:
@@ -197,65 +108,29 @@ class Loader(object):
     """
     transformer_class = Transformer
     reader_class = csv.DictReader
-    reader_kwargs = {'delimiter': u'\t', 'quoting': csv.QUOTE_NONE}
+    reader_kwargs = None
     generator_class = InstanceGenerator
     model_class = None
     extractor_class = Extractor
     persistence = []
 
-    def __init__(self, source, model_class=None, options={}):
+    def __init__(self, source, model_class=None, logger=None, options=None):
         self.source = source
-        self.options = options
+        self.filename = source.name if hasattr(source, 'name') else source
+        self.options = options or {}
         self.model_class = model_class or self.model_class
-        self.logfilename = options.get('logfilename')
-        self.feedbacksize = options.get('feedbacksize', 5000)
-        self.logfile = get_logfile(
-            filename=self.source, logfilename=self.logfilename)
-        self.extractor = self.extractor_class(
-            self.source, self.reader_class, self.reader_kwargs,
-            options=options)
-        self.slice_begin = options.get('slice_begin', 0)
-        self.slice_end = options.get('slice_end')
-        self.generator = self.generator_class(
-            self.model_class, persistence=self.persistence, options=options)
-        self.options = options
+        self.logger = logger or StdoutLogger()
+        self.logger.filename = self.filename
+        self.extractor = self.extractor_class(self.source, self.reader_class,
+                                              self.reader_kwargs,
+                                              options=self.options)
+        self.slice_begin = self.options.get('slice_begin')
+        self.slice_end = self.options.get('slice_end')
+        self.generator = self.generator_class(self.model_class,
+                                              persistence=self.persistence,
+                                              options=self.options)
 
-    def feedback_hook(self, counter):
-        """
-        Create actions that will be triggered after the number of records
-        defined in self.feedbacksize. This can be used to store a file position
-        to a database to continue a load later.
-
-        Returns:
-            Boolean: Must be True otherwise load operation will be
-            aborted.
-
-        """
-        return True
-
-    def feedback(self, counter):
-        if counter.counter % self.feedbacksize == 0:
-            counter.feedback(
-            filename=self.source, records=self.feedbacksize)
-            if not self.feedback_hook(counter.counter):
-                raise StopIteration
-
-    def reader_reject(self, counter, logger, e):
-        logger.log_reader_error(counter.counter, e)
-        counter.reject()
-        self.feedback(counter)
-
-    def transformation_reject(self, counter, logger, e):
-        logger.log_transformation_error(counter.counter, e)
-        counter.reject()
-        self.feedback(counter)
-
-    def generator_reject(self, counter, logger, e):
-        logger.log_instance_error(counter.counter, e)
-        counter.reject()
-        self.feedback(counter)
-
-    def process(self, extractor, counter, logger):
+    def process(self, extractor):
         """
         This is broken out from below and should be better
         organized.
@@ -264,7 +139,9 @@ class Loader(object):
         try:
             dic = extractor.next()
         except (UnicodeDecodeError, csv.Error) as e:
-            self.reader_reject(counter, logger, e)
+            # TODO check
+            self.logger.reject(dic, e)
+            # self.reader_reject(counter, logger, e)
             return
 
         defaults = self.options.get('defaults') or {}
@@ -276,45 +153,44 @@ class Loader(object):
                 raise ValidationError('Transformer did not return valid data')
         except (ValidationError, ValueError, IndexError,
                 KeyError) as e:
-            self.transformation_reject(counter, logger, e)
+            # TODO check
+            self.logger.reject(e)
+            # self.transformation_reject(counter, logger, e)
             return
 
         try:
-            self.generator.get_instance(dic)
-        except (ValidationError, IntegrityError, DatabaseError,
-                ValueError) as e:
-            self.generator_reject(counter, logger, e)
+            instance = self.generator.get_instance(dic)
+        except (ValidationError, IntegrityError,
+                DatabaseError, ValueError) as exc:
+            if hasattr(exc, 'message_dict'):
+                msg = ', '.join(' '.join([f, '(%s)' % ', '.join(err)])
+                                for f, err in exc.message_dict.items())
+            else:
+                msg = str(exc)
+            self.logger.reject(msg, dic)
             return
 
-        counter.use_result(self.generator.res)
-        self.feedback(counter)
-
+        self.logger.accept(self.generator.res, dic, instance)
 
     def load(self):
         """
         Loads data into database using Django models and error logging.
         """
-        print('Opening {0}'.format(self.source))
-        logger = Logger(self.logfile)
-        logger.log_start({
-            'start_time': datetime.now().strftime('%Y-%m-%d'),
-            'slice_begin': self.slice_begin,
-            'slice_end': self.slice_end})
-        counter = FeedbackCounter()
+        self.logger.status('Opening %s.', self.source)
+        self.logger.start()
 
         with self.extractor as extractor:
 
-            while self.slice_begin and self.slice_begin > counter.counter:
+            while self.slice_begin and self.slice_begin > self.logger.counter:
                 extractor.next()
-                counter.increment()
+                self.logger.skip()
 
-            while not self.slice_end or self.slice_end >= counter.counter:
+            while not self.slice_end or self.slice_end >= self.logger.counter:
                 try:
-                    self.process(extractor, counter, logger)
+                    self.process(extractor)
                 except StopIteration:
                     break
 
             if self.generator.finalize():
-                logger.log(counter.finished())
-
-            logger.close()
+                self.logger.finish()
+                return self.logger.counter

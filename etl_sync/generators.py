@@ -323,7 +323,10 @@ class InstanceGenerator(BaseGenerator):
             fieldtype = get_internal_type(field)
             prepare_function = getattr(
                 self, self.preparations[fieldtype], self.prepare_field)
-            res = prepare_function(field, dic.pop(field.name))
+            try:
+                res = prepare_function(field, dic.pop(field.name))
+            except ValidationError as e:
+                raise ValidationError({field.name:str(e.message)})
             if res is not None:
                 ret[field.name] = res
         return ret
