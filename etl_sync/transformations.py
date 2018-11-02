@@ -16,7 +16,7 @@ class Transformer(object):
     blacklist = {}
     defaults = {}
 
-    def __init__(self, dic, defaults={}):
+    def __init__(self, dic, defaults=None):
         self.dic = dic
         if defaults:
             self.defaults = defaults
@@ -63,8 +63,10 @@ class Transformer(object):
     def remap(self, dic):
         """Use this method for remapping dictionary keys."""
         for key in self.mappings:
-            dic[key] = dic[self.mappings[key]]
-            del dic[self.mappings[key]]
+            m_key = self.mappings[key]
+            if key != m_key:
+                dic[key] = dic[m_key]
+                del dic[m_key]
         return dic
 
     def transform(self, dic):
