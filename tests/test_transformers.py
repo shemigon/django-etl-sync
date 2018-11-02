@@ -39,7 +39,10 @@ class TestTransformer(TestCase):
 
     def test_remap(self):
         dic = {
-            'TEST': 'test', 'another_field': 'content', 'third_field': 'text'}
+            'TEST': 'test',
+            'another_field': 'content',
+            'third_field': 'text'
+        }
         transformer = Transformer(dic)
         transformer.mappings = {'test': 'TEST', 'field': 'another_field'}
         self.assertTrue(transformer.is_valid())
@@ -62,3 +65,61 @@ class TestTransformer(TestCase):
         self.assertIsInstance(transformer.cleaned_data['date'], datetime)
         transformer = MyTransformer({'name': 'fred'})
         self.assertFalse(transformer.is_valid())
+
+    def test_fully_nested_mappings(self):
+        class NestedTransformer(Transformer):
+            mappings = {
+                'external_id': 'External ID',
+                'client_employee': {
+                    'external_id': 'External ID',
+                    'first_name': 'First name',
+                    'last_name': 'Last name',
+                    'organization': {
+                        'external_organization_id': 'External organizaion ID',
+                        'name': 'Organization name',
+                    },
+                    'feedbacks': {
+                        'text': 'Feedback',
+                    },
+                }
+            }
+
+        transformer = NestedTransformer({})
+        self.assertDictEqual(transformer.mappings, {
+            'external_id': 'External ID',
+            'client_employee.external_id': 'External ID',
+            'client_employee.first_name': 'First name',
+            'client_employee.last_name': 'Last name',
+            'client_employee.organization.external_organization_id':
+                'External organizaion ID',
+            'client_employee.organization.name': 'Organization name',
+            'client_employee.feedbacks.text': "Feedback",
+        })
+
+    def test_partial_nested_mappings(self):
+        class NestedTransformer(Transformer):
+            mappings = {
+                'external_id': 'External ID',
+                'client_employee': {
+                    'external_id': 'External ID',
+                    'first_name': 'First name',
+                    'last_name': 'Last name',
+                    'organization': {
+                        'external_organization_id': 'External organizaion ID',
+                    },
+                    'organization.name': 'Organization name',
+                    'feedbacks.text': "Feedback",
+                }
+            }
+
+        transformer = NestedTransformer({})
+        self.assertDictEqual(transformer.mappings, {
+            'external_id': 'External ID',
+            'client_employee.external_id': 'External ID',
+            'client_employee.first_name': 'First name',
+            'client_employee.last_name': 'Last name',
+            'client_employee.organization.external_organization_id':
+                'External organizaion ID',
+            'client_employee.organization.name': 'Organization name',
+            'client_employee.feedbacks.text': "Feedback",
+        })

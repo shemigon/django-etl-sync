@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 from future.utils import iteritems
 
 import re
@@ -20,6 +22,22 @@ class Transformer(object):
         self.dic = dic
         if defaults:
             self.defaults = defaults
+        self.mappings = self._flatten_mappings()
+
+    def _flatten_mappings(self, prefix=None, dic=None):
+        def with_prefix(n):
+            if prefix:
+                return '%s.%s' % (prefix, n)
+            return n
+
+        dic = dic or self.mappings
+        res = {}
+        for k, v in dic.items():
+            if isinstance(v, dict):
+                res.update(self._flatten_mappings(with_prefix(k), v))
+            else:
+                res[with_prefix(k)] = v
+        return res
 
     def _process_forms(self, dic):
         """Processes a list of forms."""
@@ -62,12 +80,29 @@ class Transformer(object):
 
     def remap(self, dic):
         """Use this method for remapping dictionary keys."""
+        data = dic.copy()
         for key in self.mappings:
             m_key = self.mappings[key]
-            if key != m_key:
-                dic[key] = dic[m_key]
-                del dic[m_key]
-        return dic
+            data[key] = dic[m_key]
+            if m_key != key:
+                try:
+                    del data[m_key]  # delete remapped fields from results
+                except KeyError:
+                    pass
+        return data
+
+    def remap_relations(self, dic):
+        def dd():
+            return defaultdict(dd)
+
+        data = dd()
+        for name, value in dic.items():
+            p = data
+            parts = name.split('.')
+            for n in parts[:-1]:
+                p = p[n]
+            p[parts[-1]] = value
+        return data
 
     def transform(self, dic):
         """Additional transformations not covered by remap and forms."""
@@ -80,6 +115,7 @@ class Transformer(object):
         dic = self._apply_defaults(dic)
         dic = self._process_forms(dic)
         self.check_blacklist(dic)
+        dic = self.remap_relations(dic)
         dic = self.transform(dic)
         self.validate(dic)
         return dic

@@ -6,7 +6,7 @@ from future.utils import iteritems
 from collections import OrderedDict
 from hashlib import md5
 from django.core.exceptions import ValidationError, FieldError
-from django.db.models import (Q, FieldDoesNotExist)
+from django.db.models import Q, FieldDoesNotExist, ManyToOneRel
 from django.forms import DateTimeField
 
 
@@ -142,22 +142,26 @@ class BaseGenerator(object):
         persistence = dic.pop('etl_persistence', self.persistence)
         create = dic.pop('etl_create', self.create)
         update = dic.pop('etl_update', self.update)
-        dic = self.prepare(dic)
+        dic, back_refs = self.prepare(dic)
         dic, qs, update = self.get_persistence_query(dic, persistence, update)
         dic = {item:dic[item] for item in dic if item in self.field_names}
+        instance = None
         if qs:
             if update:
                 instance = self.update_in_db(dic, qs)
                 self.res = 'updated'
-                return instance
             else:
                 self.res = 'exists'
-                return qs[0]
+                instance = qs[0]
         else:
             if create:
                 instance = self.create_in_db(dic)
                 self.res = 'created'
-                return instance
+        if back_refs and instance:
+            for field, data in back_refs.items():
+                data[field.field.name] = instance
+                self.__class__(field.related_model).get_instance(data)
+        return instance
 
     def instance_from_int(self, intnumber):
         query = {self.related_field or 'pk': intnumber}
@@ -208,7 +212,7 @@ class BaseGenerator(object):
             return self.instance_from_str(obj)
 
     def prepare(self, dic):
-        return dic
+        return dic, {}
 
     def finalize(self):
         """
@@ -251,10 +255,12 @@ class InstanceGenerator(BaseGenerator):
         return value
 
     def prepare_fk(self, field, value):
-        options = {'related_field': field.related_fields[0][1].name}
+        try:
+            options = {'related_field': field.related_fields[0][1].name}
+        except AttributeError:
+            options = {'related_field': field.related_name}
         related = getattr(field, 'related_model')
-        return InstanceGenerator(
-            related, options=options).get_instance(value)
+        return InstanceGenerator(related, options=options).get_instance(value)
 
     def prepare_m2m(self, field, lst):
         """
@@ -317,19 +323,23 @@ class InstanceGenerator(BaseGenerator):
 
     def prepare(self, dic):
         ret = {}
+        back_refs = {}
         for field in get_fields(self.model_class):
             if field.name not in dic:
                 continue
+            if isinstance(field, ManyToOneRel):
+                back_refs[field] = dic.pop(field.name)
+                continue
             fieldtype = get_internal_type(field)
-            prepare_function = getattr(
-                self, self.preparations[fieldtype], self.prepare_field)
+            prepare_function = getattr(self, self.preparations[fieldtype],
+                                       self.prepare_field)
             try:
                 res = prepare_function(field, dic.pop(field.name))
             except ValidationError as e:
                 raise ValidationError({field.name:str(e.message)})
             if res is not None:
                 ret[field.name] = res
-        return ret
+        return ret, back_refs
 
 
 class HashMixin(object):
