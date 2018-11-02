@@ -107,6 +107,47 @@ class TestLoad(TransactionTestCase):
         self.assertEqual(TestModel.objects.all().count(), 3)
 
 
+class TestHeaderlessLoad(TransactionTestCase):
+    """
+    Tests data loading from file without headers.
+    """
+
+    def setUp(self):
+        path = os.path.dirname(os.path.realpath(__file__))
+        self.filename = '{0}/data_no_headers.txt'.format(path)
+
+    def tearDown(self):
+        path = os.path.dirname(os.path.realpath(__file__))
+        files = glob.glob('%s/data.txt.*.log' % path)
+        for fil in files:
+            os.remove(fil)
+
+    def test_load_from_file(self):
+        class HeaderlessTransformer(Transformer):
+            mappings = {
+                'rec': 'rec',
+                'name': 'name',
+                'nochwas': 'nochwas',
+            }
+
+        class HeaderlessLoader(Loader):
+            """"""
+            transformer_class = HeaderlessTransformer
+            reader_kwargs = {
+                'fieldnames': [
+                    'rec', 'name', 'nochwas',
+                ],
+                'delimiter': u'\t',
+                'quoting': csv.QUOTE_NONE
+            }
+
+        model = ElNumero
+
+        loader = HeaderlessLoader(self.filename, model_class=model)
+        loader.load()
+        self.assertEqual(model.objects.count(), 3)
+
+
 class TestExtractor(TestCase):
     """Test newly introduced ExtractorClass."""
 

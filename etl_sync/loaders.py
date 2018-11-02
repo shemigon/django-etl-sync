@@ -27,7 +27,7 @@ class Extractor(object):
     Return reader instance.
     """
 
-    def __init__(self, source, reader_class=csv.DictReader,
+    def __init__(self, source, reader_class=None,
                  reader_kwargs=None, options=None):
         self.source = source
         self.options = options or {}
