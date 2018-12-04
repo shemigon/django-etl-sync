@@ -1,14 +1,15 @@
-from __future__ import print_function
+from __future__ import absolute_import, print_function
 
 import io
 
 from backports import csv
 from django.core.exceptions import ValidationError
-from django.db import DatabaseError, IntegrityError
+from django.db import DatabaseError, IntegrityError, transaction
 
-from etl_sync.generators import InstanceGenerator
-from etl_sync.logging import StdoutLogger
-from etl_sync.transformations import Transformer
+from .generators import InstanceGenerator
+from .logging import StdoutLogger
+from .transformations import Transformer
+from .types import CaseInsensitiveDict
 
 
 class Extractor(object):
@@ -138,10 +139,9 @@ class Loader(object):
 
         try:
             dic = extractor.next()
+            # dic = CaseInsensitiveDict(extractor.next())
         except (UnicodeDecodeError, csv.Error) as e:
-            # TODO check
-            self.logger.reject(dic, e)
-            # self.reader_reject(counter, logger, e)
+            self.logger.reject(str(e))
             return
 
         defaults = self.options.get('defaults') or {}
@@ -150,12 +150,9 @@ class Loader(object):
             if transformer.is_valid():
                 dic = transformer.cleaned_data
             else:
-                raise ValidationError('Transformer did not return valid data')
-        except (ValidationError, ValueError, IndexError,
-                KeyError) as e:
-            # TODO check
-            self.logger.reject(e)
-            # self.transformation_reject(counter, logger, e)
+                raise ValidationError(transformer.error)
+        except (ValidationError, ValueError, IndexError, KeyError) as e:
+            self.logger.reject(str(e), dic)
             return
 
         try:
@@ -177,7 +174,7 @@ class Loader(object):
         """
         Loads data into database using Django models and error logging.
         """
-        self.logger.status('Opening %s.', self.source)
+        self.logger.status('Opening %s.', self.filename)
         self.logger.start()
 
         with self.extractor as extractor:

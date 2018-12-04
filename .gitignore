@@ -10,3 +10,6 @@ conf.py
 README.rst.rst
 _build/
 build/
+.idea
+env
+.vagrant

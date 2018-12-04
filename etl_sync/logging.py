@@ -25,12 +25,17 @@ class Counter(object):
         self.next()
 
     def update(self):
-        self.created += 1
+        self.updated += 1
         self.next()
 
     def reject(self):
         self.rejected += 1
         self.next()
+
+    @property
+    def time(self):
+        return self.finish_time - self.start_time
+
 
 
 class BaseLogger(object):
@@ -41,6 +46,12 @@ class BaseLogger(object):
         self.counter = None
         if counter_class is not None:
             self.counter_class = counter_class
+
+    def flush(self):
+        """
+        finalize logger output
+        """
+        pass
 
     def status(self, msg, *args):
         pass
@@ -59,7 +70,7 @@ class BaseLogger(object):
         else:
             self.counter.next()
 
-    def reject(self, msg, dic):
+    def reject(self, msg, dic=None):
         self.counter.reject()
 
     def skip(self):
@@ -85,8 +96,7 @@ class StdoutLogger(BaseLogger):
             '{} rejected'.format(self.counter.rejected),
             '',
             'Data extraction finished {}'.format(self.counter.finish_time),
-            'Time spent: {}'.format(self.counter.finish_time -
-                                    self.counter.start_time),
+            'Time spent: {}'.format(self.counter.time),
             '',
         ]
         print('\n'.join(lines))
