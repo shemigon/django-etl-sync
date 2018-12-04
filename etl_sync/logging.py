@@ -1,6 +1,8 @@
-from __future__ import print_function
+from __future__ import print_function, absolute_import
 
 from datetime import datetime
+
+from .types import GenerationStatus
 
 
 class Counter(object):
@@ -50,9 +52,9 @@ class BaseLogger(object):
         self.counter.finish()
 
     def accept(self, action, dic, instance):
-        if action == 'created':
+        if action == GenerationStatus.Created:
             self.counter.create()
-        elif action == 'updated':
+        elif action == GenerationStatus.Updated:
             self.counter.update()
         else:
             self.counter.next()

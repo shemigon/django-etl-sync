@@ -17,6 +17,7 @@ def get_unique_fields(model_class):
     return [
         f.name for f in model_class._meta.fields
         if f.unique and not f.name == 'id']
+from etl_sync.types import GenerationStatus
 
 
 def get_internal_type(field):
@@ -149,14 +150,14 @@ class BaseGenerator(object):
         if qs:
             if update:
                 instance = self.update_in_db(dic, qs)
-                self.res = 'updated'
+                self.res = GenerationStatus.Updated
             else:
-                self.res = 'exists'
+                self.res = GenerationStatus.Exists
                 instance = qs[0]
         else:
             if create:
                 instance = self.create_in_db(dic)
-                self.res = 'created'
+                self.res = GenerationStatus.Created
         if back_refs and instance:
             for field, data in back_refs.items():
                 data[field.field.name] = instance
@@ -203,10 +204,10 @@ class BaseGenerator(object):
             self.assign_related(instance)
             return instance
         if isinstance(obj, self.model_class):
-            self.res = 'exists'
+            self.res = GenerationStatus.Exists
             return obj
         if isinstance(obj, int):
-            self.res = 'exists'
+            self.res = GenerationStatus.Exists
             return self.instance_from_int(obj)
         if isinstance(obj, (text_type, binary_type)):
             return self.instance_from_str(obj)
