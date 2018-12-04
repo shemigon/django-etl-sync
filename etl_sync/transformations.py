@@ -104,18 +104,31 @@ class Transformer(object):
                     pass
         return data
 
-    def remap_relations(self, dic):
+    def _remap_relations(self, dic):
         def dd():
             return defaultdict(dd)
 
         data = dd()
         for name, value in dic.items():
+            if name is None:
+                continue
             p = data
             parts = name.split('.')
             for n in parts[:-1]:
                 p = p[n]
             p[parts[-1]] = value
         return data
+
+    def _clean_relations(self, dic):
+        def clean_dic(d):
+            res = {}
+            for n, v in d.items():
+                if isinstance(v, dict):
+                    v = clean_dic(v)
+                if v:
+                    res[n] = v
+            return res
+        return clean_dic(dic)
 
     def transform(self, dic):
         """Additional transformations not covered by remap and forms."""
@@ -126,9 +139,10 @@ class Transformer(object):
         # Order is important here
         dic = self.remap(dic)
         dic = self._apply_defaults(dic)
-        dic = self._process_forms(dic)
         self.check_blacklist(dic)
-        dic = self.remap_relations(dic)
+        dic = self._remap_relations(dic)
+        dic = self._clean_relations(dic)
+        dic = self._process_forms(dic)
         dic = self.transform(dic)
         self.validate(dic)
         return dic

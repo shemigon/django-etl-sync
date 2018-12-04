@@ -112,7 +112,7 @@ class Loader(object):
     generator_class = InstanceGenerator
     model_class = None
     extractor_class = Extractor
-    persistence = []
+    persistence = None
 
     def __init__(self, source, model_class=None, logger=None, options=None):
         self.source = source

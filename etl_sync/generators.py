@@ -1,22 +1,16 @@
 from __future__ import print_function
-from six import text_type, binary_type
-from builtins import str as text
-from future.utils import iteritems
 
+from builtins import str as text
 from collections import OrderedDict
 from hashlib import md5
-from django.core.exceptions import ValidationError, FieldError
-from django.db.models import Q, FieldDoesNotExist, ManyToOneRel
+from typing import List
+
+from django.core.exceptions import FieldError, ValidationError
+from django.db.models import FieldDoesNotExist, ManyToOneRel, Q
 from django.forms import DateTimeField
+from future.utils import iteritems
+from six import binary_type, text_type
 
-
-def get_unique_fields(model_class):
-    """
-    Return model fields with unique=True.
-    """
-    return [
-        f.name for f in model_class._meta.fields
-        if f.unique and not f.name == 'id']
 from etl_sync.types import GenerationStatus
 
 
@@ -70,6 +64,14 @@ def get_unambiguous_fields(model_class):
         'Failure to identify unambiguous field for {}'.format(model_class))
 
 
+def get_persistence(model_class):
+    res: List = list(model_class._meta.unique_together)
+    res.extend([field.name for field in get_fields(model_class)
+                     if getattr(field, 'unique', None) and
+                     get_internal_type(field) != 'AutoField'])
+    return res
+
+
 def get_unique_string_fields(model_class):
     """
     Unique string fields are used to auto normalize ForeignKey
@@ -84,16 +86,16 @@ def get_unique_string_fields(model_class):
 class BaseGenerator(object):
     persistence = None
 
-    def __init__(self, model_class, persistence=[], options={}):
+    def __init__(self, model_class, persistence=None, options=None):
+        options = options or {}
         self.model_class = model_class
         self.related_instances = {}
         self.create = options.get('create', True)
         self.update = options.get('update', True)
         self.related_field = options.get('related_field')
         self.res = None
-        self.persistence = (
-            self.persistence or persistence or
-            get_unambiguous_fields(self.model_class))
+        self.persistence = (self.persistence or persistence or
+                            get_persistence(self.model_class))
         if isinstance(self.persistence, (text_type, binary_type)):
             self.persistence = [self.persistence]
         self.model_fields = get_fields(self.model_class)
@@ -108,10 +110,19 @@ class BaseGenerator(object):
     def get_from_db(self, dic, lookup):
         if lookup:
             query = Q()
-            for fieldname in lookup:
-                value = dic.get(fieldname, None)
-                if value:
-                    query = query & Q(**{fieldname: value})
+            for field in lookup:
+                if isinstance(field, (list, tuple)):
+                    sub_q = Q()
+                    for sub_field in field:
+                        value = dic.get(sub_field, None)
+                        if value is not None:
+                            sub_q &= Q(**{sub_field: value})
+                    if sub_q:
+                        query |= sub_q
+                else:
+                    value = dic.get(field, None)
+                    if value:
+                        query |= Q(**{field: value})
             try:
                 return self.model_class.objects.filter(query)
             except FieldError:
@@ -261,7 +272,7 @@ class InstanceGenerator(BaseGenerator):
         except AttributeError:
             options = {'related_field': field.related_name}
         related = getattr(field, 'related_model')
-        return InstanceGenerator(related, options=options).get_instance(value)
+        return self.__class__(related, options=options).get_instance(value)
 
     def prepare_m2m(self, field, lst):
         """
@@ -273,7 +284,7 @@ class InstanceGenerator(BaseGenerator):
             lst = [lst]
         for item in lst:
             related = getattr(field, 'related_model')
-            generator = InstanceGenerator(related)
+            generator = self.__class__(related)
             instance = generator.get_instance(item)
             self.related_instances[field.name].append(instance)
 
@@ -339,6 +350,8 @@ class InstanceGenerator(BaseGenerator):
             except ValidationError as e:
                 raise ValidationError({field.name:str(e.message)})
             if res is not None:
+                if not res and getattr(field, 'null', False):
+                    res = None
                 ret[field.name] = res
         return ret, back_refs
 
