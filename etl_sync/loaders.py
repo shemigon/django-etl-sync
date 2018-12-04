@@ -159,7 +159,8 @@ class Loader(object):
             return
 
         try:
-            instance = self.generator.get_instance(dic)
+            with transaction.atomic():
+                instance = self.generator.get_instance(dic)
         except (ValidationError, IntegrityError,
                 DatabaseError, ValueError) as exc:
             if hasattr(exc, 'message_dict'):
