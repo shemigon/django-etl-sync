@@ -10,7 +10,9 @@ class Transformer(object):
     """Base transformer. Django forms can be used instead.
     This class contains only the bare minimum of methods
     and is able to process a list of forms."""
-    forms = []
+
+    # {'': Form1, 'nested_field': Form2, 'nested1.nested2: Form3, ... ]
+    forms = {}
     error = None
     # dictionary of mappings applied in remap
     mappings = {}
@@ -41,12 +43,23 @@ class Transformer(object):
 
     def _process_forms(self, dic):
         """Processes a list of forms."""
-        for form in self.forms:
-            frm = form(dic)
-            if frm.is_valid():
-                dic.update(frm.cleaned_data)
+        errors = {}
+
+        for field_name, form_class in self.forms.items():
+            if field_name:
+                if field_name not in dic:
+                    continue
+                form_dic = dic[field_name]
             else:
-                raise ValidationError(frm.errors)
+                form_dic = dic
+
+            frm = form_class(form_dic)
+            if frm.is_valid():
+                form_dic.update(frm.cleaned_data)
+            else:
+                errors.update(frm.errors)
+        if errors:
+            raise ValidationError(errors)
         return dic
 
     def _apply_defaults(self, dictionary):
