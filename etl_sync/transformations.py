@@ -142,9 +142,9 @@ class Transformer(object):
         self.check_blacklist(dic)
         dic = self._remap_relations(dic)
         dic = self._clean_relations(dic)
-        dic = self._process_forms(dic)
         dic = self.transform(dic)
         self.validate(dic)
+        dic = self._process_forms(dic)
         return dic
 
     def clean(self, dic):
