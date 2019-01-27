@@ -37,15 +37,11 @@ class Counter(object):
         return self.finish_time - self.start_time
 
 
-
-class BaseLogger(object):
-    counter_class = Counter
-    filename = None
-
+class BaseLogger:
     def __init__(self, counter_class=None):
         self.counter = None
-        if counter_class is not None:
-            self.counter_class = counter_class
+        self.counter_class = counter_class or Counter
+        self.filename = None
 
     def flush(self):
         """
@@ -56,10 +52,10 @@ class BaseLogger(object):
     def status(self, msg, *args):
         pass
 
-    def start(self):
+    def start(self, msg=None):
         self.counter = self.counter_class()
 
-    def finish(self):
+    def finish(self, msg=None):
         self.counter.finish()
 
     def accept(self, action, dic, instance):
@@ -73,7 +69,7 @@ class BaseLogger(object):
     def reject(self, msg, dic=None):
         self.counter.reject()
 
-    def skip(self):
+    def skip(self, msg=None):
         self.counter.next()
 
 
@@ -85,7 +81,7 @@ class StdoutLogger(BaseLogger):
         super(StdoutLogger, self).reject(msg, dic)
         print('Error, row {}: {}'.format(self.counter.pos, msg))
 
-    def finish(self):
+    def finish(self, msg=None):
         super(StdoutLogger, self).finish()
         lines = [
             '',
@@ -99,4 +95,6 @@ class StdoutLogger(BaseLogger):
             'Time spent: {}'.format(self.counter.time),
             '',
         ]
+        if msg:
+            lines.append(msg)
         print('\n'.join(lines))
