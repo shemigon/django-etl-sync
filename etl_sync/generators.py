@@ -171,8 +171,11 @@ class BaseGenerator(object):
                 self.res = GenerationStatus.Created
         if back_refs and instance:
             for field, data in back_refs.items():
-                data[field.field.name] = instance
-                self.__class__(field.related_model).get_instance(data)
+                if not isinstance(data, list):
+                    data = [data]
+                for datum in data:
+                    datum[field.field.name] = instance
+                    self.__class__(field.related_model).get_instance(datum)
         return instance
 
     def instance_from_int(self, intnumber):
