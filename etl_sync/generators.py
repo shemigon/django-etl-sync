@@ -297,6 +297,9 @@ class InstanceGenerator(BaseGenerator):
             return formfield.clean(value)
 
     def prepare_text(self, field, value):
+        if value is None:
+            return None
+
         if not isinstance(value, (text_type, binary_type)):
             ret = text(value)
         else:
